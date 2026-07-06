@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>キャットダッシュ</title>
+    <style>
+        body { margin: 0; display: flex; align-items: center; justify-content: center; height: 100vh; background-color: #fdf6e3; overflow: hidden; }
+        #gameWrapper { position: relative; width: 100vw; max-width: 800px; height: 300px; }
+        canvas { width: 100%; height: 100%; border: 4px solid #5d4037; background-color: #fff; border-radius: 10px; display: block; }
+        #startScreen { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255,255,255,0.9); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 10; border-radius: 10px; }
+        #rankList { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 20px; border: 3px solid #5d4037; border-radius: 10px; display: none; z-index: 20; width: 80%; max-height: 80%; overflow-y: auto; }
+        .heart { color: #ff5252; margin-right: 5px; font-size: 20px; }
+    </style>
+</head>
+<body>
+    <div id="gameWrapper">
+        <canvas id="gameCanvas" width="800" height="300"></canvas>
+        <div id="ui" style="position: absolute; top: 10px; left: 10px; pointer-events: none;">
+            <div id="livesDisplay"></div>
+            <div id="distanceDisplay" style="font-size: 20px; color: #5d4037;">距離: 0m</div>
+        </div>
+        <div id="startScreen">
+            <h1>キャットダッシュ</h1>
+            <button onclick="startGame()">スタート</button>
+            <button onclick="showRanking()" style="margin-top:10px;">ランキングを見る</button>
+        </div>
+        <div id="rankList">
+            <h3>ランキング (TOP 100)</h3>
+            <ul id="rankItems"></ul>
+            <button onclick="document.getElementById('rankList').style.display='none'">閉じる</button>
+        </div>
+    </div>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const startScreen = document.getElementById('startScreen');
+const livesDisplay = document.getElementById('livesDisplay');
+const distanceDisplay = document.getElementById('distanceDisplay');
+
+// 画像設定
+const catImages = [], bgImg = new Image(), noteImg = new Image(), fishImg = new Image();
+bgImg.src = 'images/background.png'; noteImg.src = 'images/note.png'; fishImg.src = 'images/fish.png';
+for(let i = 0; i < 4; i++) { catImages[i] = new Image(); catImages[i].src = `images/cat${i}.png`; }
+
+let loadedCount = 0;
+const totalImages = 7;
+[bgImg, noteImg, fishImg, ...catImages].forEach(img => img.onload = () => loadedCount++);
+
+let cat = { x: 50, y: 190, vy: 0, jumpCount: 0 };
+let obstacles = [], fish = [], hearts = [], floatingTexts = [], distance = 0, lives = 3, gameActive = false, frame = 0;
+
+// GAS連携関数
+async function saveScoreToSheet(name, score) {
+    const url = "https://script.google.com/macros/s/AKfycbzmloImQqA6CN6GIbPa9D8O0SdvnkWAx0SVYv4Ec5DuGmeEugIsrfvrFNdTctAOkjAi/exec";
+    await fetch(url, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, score }) });
+}
+
+async function getRankingFromSheet() {
+    const url = "https://script.google.com/macros/s/AKfycbzmloImQqA6CN6GIbPa9D8O0SdvnkWAx0SVYv4Ec5DuGmeEugIsrfvrFNdTctAOkjAi/exec";
+    const res = await fetch(url);
+    return await res.json();
+}
+
+async function showRanking() {
+    document.getElementById('rankList').style.display = 'block';
+    const list = document.getElementById('rankItems');
+    list.innerHTML = "読み込み中...";
+    try {
+        let ranking = await getRankingFromSheet();
+        list.innerHTML = ranking.map((e, i) => `<li>${i + 1}位: ${e.name} - ${e.score}m</li>`).join('');
+    } catch(e) { list.innerHTML = "読み込み失敗"; }
+}
+
+function update() {
+    if (!gameActive) return;
+    cat.vy += 0.8; cat.y += cat.vy;
+    if (cat.y > 190) { cat.y = 190; cat.vy = 0; cat.jumpCount = 0; }
+
+    if (frame % 50 === 0) obstacles.push({ x: 800, y: 130 + Math.random() * 120 });
+    if (frame % 300 === 0) fish.push({ x: 800, y: 100 + Math.random() * 50 });
+    if (frame % 800 === 0) hearts.push({ x: 800, y: 100 + Math.random() * 50 });
+
+    [obstacles, fish, hearts].forEach(arr => arr.forEach((o, i) => {
+        o.x -= 5;
+        if (o.x < -40) arr.splice(i, 1);
+        if (Math.abs(o.x - cat.x) < 40 && Math.abs(o.y - cat.y) < 40) {
+            if (arr === obstacles) { lives--; updateUI(); if(lives <= 0) endGame(); arr.splice(i, 1); }
+            else if (arr === fish) { fish.splice(i, 1); distance += 1000; floatingTexts.push({text:"+100m", x:o.x, y:o.y, life:30}); }
+            else { hearts.splice(i, 1); if(lives < 3) { lives++; updateUI(); } }
+        }
+    }));
+
+    distance += 1;
+    distanceDisplay.innerText = `距離: ${Math.floor(distance/10)}m`;
+    frame++;
+    draw();
+    requestAnimationFrame(update);
+}
+
+function updateUI() { livesDisplay.innerHTML = '<span class="heart">❤</span>'.repeat(lives); }
+
+function draw() {
+    ctx.clearRect(0, 0, 800, 300);
+    if (loadedCount >= 1) ctx.drawImage(bgImg, 0, 0, 800, 300);
+    let img = catImages[Math.floor(frame / 8) % 4];
+    ctx.drawImage(img, cat.x, cat.y, 80, 80);
+
+    obstacles.forEach(o => ctx.drawImage(noteImg, o.x, o.y, 40, 40));
+    fish.forEach(f => ctx.drawImage(fishImg, f.x, f.y, 60, 60));
+    ctx.fillStyle = '#ff5252'; ctx.font = '30px Arial';
+    hearts.forEach(h => ctx.fillText('❤', h.x, h.y));
+    
+    ctx.fillStyle = '#ff5722'; ctx.font = 'bold 34px Arial';
+    floatingTexts.forEach(ft => { ft.y -= 2; ft.life--; ctx.fillText(ft.text, ft.x, ft.y); });
+}
+
+function startGame() { gameActive = true; startScreen.style.display = 'none'; updateUI(); update(); }
+function endGame() {
+    gameActive = false;
+    let name = prompt("ゲームオーバー！名前を入力：") || "名無し猫";
+    saveScoreToSheet(name, Math.floor(distance / 10));
+    location.reload();
+}
+window.addEventListener('mousedown', () => { if(cat.jumpCount < 2) { cat.vy = -12; cat.jumpCount++; } });
+</script>
+</body>
+</html>
