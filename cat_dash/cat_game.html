@@ -5,9 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>キャットダッシュ縦長版</title>
     <style>
-        body { margin: 0; display: flex; align-items: center; justify-content: center; height: 100vh; background-color: #fdf6e3; overflow: hidden; touch-action: manipulation; }
+        body { margin: 0; display: flex; align-items: center; justify-content: center; height: 100vh; background-color: #fdf6e3; overflow: hidden; touch-action: none; }
         #gameWrapper { position: relative; width: 95vw; max-width: 400px; height: 90vh; }
-        canvas { width: 100%; height: 100%; border: 4px solid #5d4037; background-color: #fff; border-radius: 10px; display: block; }
+        canvas { width: 100%; height: 100%; border: 4px solid #5d4037; background-color: #fff; border-radius: 10px; display: block; touch-action: none; }
         #startScreen { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255,255,255,0.95); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 10; }
         button { 
             pointer-events: auto;
@@ -15,25 +15,24 @@
         }
         #rankList { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 20px; border: 3px solid #5d4037; border-radius: 10px; display: none; z-index: 20; width: 80%; height: 60%; overflow-y: auto; }
         .heart { color: #ff5252; margin-right: 5px; font-size: 24px; }
-        #ui { pointer-events: none; }
     </style>
 </head>
 <body>
     <div id="gameWrapper">
         <canvas id="gameCanvas" width="300" height="800"></canvas>
-        <div id="ui" style="position: absolute; top: 10px; left: 10px;">
+        <div id="ui" style="position: absolute; top: 10px; left: 10px; pointer-events: none;">
             <div id="livesDisplay"></div>
             <div id="distanceDisplay" style="font-size: 24px; color: #5d4037; font-weight: bold;">距離: 0m</div>
         </div>
         <div id="startScreen">
             <h1>キャットダッシュ</h1>
-            <button onclick="startGame()">スタートあ</button>
-            <button onclick="showRanking()">ランキング</button>
+            <button id="startButton">スタート</button>
+            <button id="rankButton">ランキング</button>
         </div>
         <div id="rankList">
             <h3>ランキング (TOP 100)</h3>
             <ul id="rankItems"></ul>
-            <button onclick="document.getElementById('rankList').style.display='none'">閉じる</button>
+            <button id="closeButton">閉じる</button>
         </div>
     </div>
 
@@ -43,6 +42,13 @@ const ctx = canvas.getContext('2d');
 const startScreen = document.getElementById('startScreen');
 const livesDisplay = document.getElementById('livesDisplay');
 const distanceDisplay = document.getElementById('distanceDisplay');
+
+// ボタンのイベント登録
+document.getElementById('startButton').addEventListener('touchstart', (e) => { e.preventDefault(); startGame(); }, {passive: false});
+document.getElementById('startButton').addEventListener('click', startGame);
+document.getElementById('rankButton').addEventListener('touchstart', (e) => { e.preventDefault(); showRanking(); }, {passive: false});
+document.getElementById('rankButton').addEventListener('click', showRanking);
+document.getElementById('closeButton').addEventListener('touchstart', (e) => { e.preventDefault(); document.getElementById('rankList').style.display='none'; }, {passive: false});
 
 const catImages = [], bgImg = new Image(), noteImg = new Image(), fishImg = new Image();
 bgImg.src = 'images/background.png'; noteImg.src = 'images/note.png'; fishImg.src = 'images/fish.png';
@@ -54,14 +60,7 @@ let obstacles = [], fish = [], hearts = [], floatingTexts = [], distance = 0, li
 const GAS_URL = "https://script.google.com/macros/s/AKfycbzmloImQqA6CN6GIbPa9D8O0SdvnkWAx0SVYv4Ec5DuGmeEugIsrfvrFNdTctAOkjAi/exec";
 
 async function saveScoreToSheet(name, score) {
-    try { 
-        await fetch(GAS_URL, { 
-            method: 'POST', 
-            mode: 'no-cors', 
-            headers: {'Content-Type': 'application/json'}, 
-            body: JSON.stringify({ name, score }) 
-        }); 
-    } catch(e) { console.error("保存失敗:", e); }
+    try { await fetch(GAS_URL, { method: 'POST', mode: 'no-cors', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ name, score }) }); } catch(e) {}
 }
 
 async function showRanking() {
@@ -72,21 +71,21 @@ async function showRanking() {
         const res = await fetch(GAS_URL);
         const ranking = await res.json();
         list.innerHTML = ranking.map((e, i) => `<li>${i + 1}位: ${e.name} - ${e.score}m</li>`).join('');
-    } catch(e) { list.innerHTML = "読み込み失敗：GAS設定を確認してください"; }
+    } catch(e) { list.innerHTML = "読み込み失敗しました"; }
 }
 
 function handleInput(e) {
-    if (e.type === 'touchstart') e.preventDefault();
     if (!gameActive) return;
     if (cat.jumpCount < 2) { cat.vy = -15; cat.jumpCount++; }
 }
 
+canvas.addEventListener('touchstart', (e) => { e.preventDefault(); handleInput(); }, { passive: false });
+canvas.addEventListener('mousedown', handleInput);
+
 function startGame() { 
-    gameActive = true; 
-    startScreen.style.display = 'none'; 
+    gameActive = true; startScreen.style.display = 'none'; 
     lives = 3; distance = 0; obstacles = []; fish = []; hearts = []; floatingTexts = [];
-    updateUI(); 
-    update(); 
+    updateUI(); update(); 
 }
 
 function updateUI() { livesDisplay.innerHTML = '<span class="heart">❤</span>'.repeat(lives); }
@@ -95,33 +94,24 @@ function update() {
     if (!gameActive) return;
     cat.vy += 0.8; cat.y += cat.vy;
     if (cat.y > 600) { cat.y = 600; cat.vy = 0; cat.jumpCount = 0; }
-
-    const getSpawnY = () => 500 + Math.random() * 100;
-
-    if (frame % 90 === 0) {
-        if (Math.random() < 0.6) {
-            obstacles.push({ x: 300, y: getSpawnY() });
-        } else {
-            obstacles.push({ x: 300, y: getSpawnY() });
-            obstacles.push({ x: 360, y: getSpawnY() });
-        }
-    }
     
-    if (frame % 250 === 0) fish.push({ x: 300, y: getSpawnY() });
-    if (frame % 600 === 0) hearts.push({ x: 300, y: getSpawnY() });
+    if (frame % 90 === 0) {
+        let spawnY = 500 + Math.random() * 100;
+        obstacles.push({ x: 300, y: spawnY });
+        if (Math.random() > 0.4) obstacles.push({ x: 360, y: spawnY });
+    }
+    if (frame % 250 === 0) fish.push({ x: 300, y: 550 });
+    if (frame % 600 === 0) hearts.push({ x: 300, y: 550 });
 
-    [obstacles, fish, hearts].forEach(arr => arr.forEach((o, i) => {
+    [obstacles, fish, hearts].forEach((arr, idx) => arr.forEach((o, i) => {
         o.x -= 5;
         if (o.x < -40) arr.splice(i, 1);
-        
-        let hitRange = (arr === obstacles) ? 30 : (arr === hearts) ? 50 : 40;
-        if (Math.abs(o.x - cat.x) < hitRange && Math.abs(o.y - cat.y) < hitRange) {
-            if (arr === obstacles) { lives--; updateUI(); if(lives <= 0) endGame(); arr.splice(i, 1); }
-            else if (arr === fish) { fish.splice(i, 1); distance += 1000; }
-            else if (arr === hearts) { hearts.splice(i, 1); if(lives < 3) { lives++; updateUI(); } }
+        if (Math.abs(o.x - cat.x) < 30 && Math.abs(o.y - cat.y) < 30) {
+            if (idx === 0) { lives--; updateUI(); if(lives <= 0) endGame(); arr.splice(i, 1); }
+            else if (idx === 1) { fish.splice(i, 1); distance += 1000; }
+            else { hearts.splice(i, 1); if(lives < 3) { lives++; updateUI(); } }
         }
     }));
-
     distance += 1;
     distanceDisplay.innerText = `距離: ${Math.floor(distance/10)}m`;
     frame++;
@@ -137,13 +127,6 @@ function draw() {
     fish.forEach(f => ctx.drawImage(fishImg, f.x, f.y, 45, 45));
     ctx.fillStyle = '#ff5252'; ctx.font = '30px Arial';
     hearts.forEach(h => ctx.fillText('❤', h.x, h.y));
-    
-    floatingTexts.forEach((ft, i) => { 
-        ft.y -= 2; ft.life--; 
-        ctx.fillStyle = ft.color;
-        ctx.fillText(ft.text, ft.x, ft.y);
-        if(ft.life <= 0) floatingTexts.splice(i, 1);
-    });
 }
 
 function endGame() {
@@ -152,9 +135,6 @@ function endGame() {
     saveScoreToSheet(name, Math.floor(distance / 10));
     location.reload();
 }
-
-window.addEventListener('touchstart', handleInput, { passive: false });
-window.addEventListener('mousedown', handleInput);
 </script>
 </body>
 </html>
